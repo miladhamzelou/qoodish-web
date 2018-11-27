@@ -6,8 +6,43 @@ const fs = require('fs');
 
 const functions = require('firebase-functions');
 const express = require('express');
-const ejs = require('ejs');
-import { isBot, generateMetadata } from './Utils';
+
+import ssr from './ssr';
+
+const BOTS = [
+  '\\+https:\\/\\/developers.google.com\\/\\+\\/web\\/snippet\\/',
+  'googlebot',
+  'google-structured-data-testing-tool',
+  'mediapartners-google',
+  'baiduspider',
+  'gurujibot',
+  'yandexbot',
+  'slurp',
+  'msnbot',
+  'bingbot',
+  'facebookexternalhit',
+  'linkedinbot',
+  'twitterbot',
+  'slackbot',
+  'telegrambot',
+  'applebot',
+  'pingdom',
+  'tumblr '
+];
+
+const IS_BOT_REGEXP = new RegExp('^.*(' + BOTS.join('|') + ').*$');
+
+const isBot = (req) => {
+  let source = req.headers['user-agent'] || '';
+  if (typeof source === 'undefined') {
+    source = 'unknown';
+  }
+  let isBot = IS_BOT_REGEXP.exec(source.toLowerCase());
+  if (isBot) {
+    isBot = isBot[1];
+  }
+  return isBot;
+};
 
 const { IncomingWebhook } = require('@slack/client');
 const feedbackWebhook = new IncomingWebhook(functions.config().app.feedback_webhook_url);
@@ -35,8 +70,12 @@ const pageRoutes = [
 app.get(pageRoutes, async (req, res) => {
   if (isBot(req)) {
     console.log(`Bot access: ${req.headers['user-agent']}`);
-    const metadata = await generateMetadata(req);
-    res.status(200).send(ejs.render(fs.readFileSync('./metadata.html').toString(), { metadata: metadata, fbAppId: functions.config().app.fb_app_id } ));
+    console.log(`Request URL: ${req.originalUrl}`);
+
+    const { html, ttRenderMs } = await ssr(`https://qoodish.com${req.originalUrl}`, req.headers['user-agent']);
+    // Add Server-Timing! See https://w3c.github.io/server-timing/.
+    res.set('Server-Timing', `Prerender;dur=${ttRenderMs};desc="Headless render time (ms)"`);
+    res.status(200).send(html); // Serve prerendered page as response.
   } else {
     //res.set('Cache-Control', 'public, max-age=300, s-maxage=600');
     res.status(200).send(fs.readFileSync('./hosting/index.html').toString());
